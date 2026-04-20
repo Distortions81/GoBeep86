@@ -2,33 +2,25 @@
 
 GoBeep86 helps Go programs play sound that feels like it is coming from an old PC speaker.
 
+Example:
+
+- YouTube: https://www.youtube.com/watch?v=vT9SldgjbeA
+
 It is for projects that want classic computer beeps, simple music, or retro sound effects without sounding too clean or modern. A big part of that is the built-in physical speaker simulation: it can model either a small paper-cone speaker or a piezo-style speaker, along with the steel PC case around it. That adds the reverb, ringing, and boxy resonance that people associate with old machines instead of a flat electronic square wave.
+
+What makes it interesting:
+
+- `VariantSmallSpeaker` simulates a paper-cone PC speaker mounted in a steel case
+- `VariantPiezo` simulates a brighter buzzer/piezo speaker coupled to the same resonant case behavior
+- the non-clean variants include built-in case resonance and ringing instead of a plain dry square wave
+- effect tones and music tones can share one simulated speaker through time interleaving
+- PCM music can be mixed with tone effects before PC speaker encoding
 
 You can use it to:
 
 - play retro sound effects and simple music from Go code
 - render PC-speaker-style audio to PCM samples for saving, mixing, or playback elsewhere
 - choose between a clean direct sound and paper-speaker or piezo speaker models with steel-case reverb/ring simulation
-
-It accepts either:
-
-- tone sequences expressed as PIT divisors
-- stereo signed 16-bit little-endian PCM that is re-driven through a simulated 1-bit speaker path
-
-It can be used in two main ways:
-
-- as a streaming `io.Reader` via `Source`
-- as offline render helpers that return `[]int16` PCM
-
-Important behavior up front:
-
-- output is always 16-bit stereo little-endian PCM
-- effect tones and music tones can share one simulated speaker through time interleaving
-- PCM music can be mixed with tone effects before PC speaker encoding
-- `VariantClean` is the dry/pass-through model
-- `VariantSmallSpeaker` simulates a paper-cone PC speaker mounted in a steel case
-- `VariantPiezo` simulates a brighter buzzer/piezo speaker coupled to the same resonant case behavior
-- the non-clean variants include built-in case resonance/ringing rather than a plain dry square wave
 
 If you just want the main entry points:
 
@@ -38,6 +30,21 @@ src.Load(effectSeq, gobeep86.DefaultOutputSampleRate)
 
 pcm, err := gobeep86.RenderSequenceToPCM(seq, tickRate, gobeep86.VariantSmallSpeaker)
 ```
+
+It can be used in two main ways:
+
+- as a streaming `io.Reader` via `Source`
+- as offline render helpers that return `[]int16` PCM
+
+It accepts either:
+
+- tone sequences expressed as PIT divisors
+- stereo signed 16-bit little-endian PCM that is re-driven through a simulated 1-bit speaker path
+
+Important behavior up front:
+
+- output is always 16-bit stereo little-endian PCM
+- `VariantClean` is the dry/pass-through model
 
 ## Features
 
