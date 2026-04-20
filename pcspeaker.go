@@ -1,3 +1,5 @@
+// Package gobeep86 simulates IBM PC speaker playback from PIT divisor
+// sequences or pre-encoded PCM that is re-driven through a 1-bit speaker path.
 package gobeep86
 
 import (
@@ -9,11 +11,17 @@ import (
 	"sync"
 )
 
+// Default timing and hardware constants used by the package.
 const (
+	// DefaultTickRate is the default tick rate used for one-shot tone sequences.
 	DefaultTickRate         = 140
+	// DefaultMixTickRate is the preferred tick rate for emulated mixed effect playback.
 	DefaultMixTickRate      = 280
+	// DefaultPCMUpdateRate is the control/update rate used for PCM-driven speaker input.
 	DefaultPCMUpdateRate    = 11025
+	// DefaultOutputSampleRate is the default rendered PCM sample rate.
 	DefaultOutputSampleRate = 44100
+	// PITHz is the PIT channel clock frequency used to derive output tones.
 	PITHz                   = 1193181
 )
 
@@ -22,6 +30,10 @@ const toneInterleaveMinCycles = 1.0
 
 var toneInterleaveTargetHz = 140.0
 
+// SetInterleaveHz sets the target tone-switch rate used when effect and music
+// tones must share a single simulated speaker.
+//
+// Values are clamped to the range 10..1000 Hz.
 func SetInterleaveHz(hz float64) {
 	if hz < 10 {
 		hz = 10
@@ -31,11 +43,16 @@ func SetInterleaveHz(hz float64) {
 	toneInterleaveTargetHz = hz
 }
 
+// Tone represents one PC speaker tick.
+//
+// When Active is false the divisor is ignored and the speaker is silent.
 type Tone struct {
 	Active  bool
 	Divisor uint16
 }
 
+// ToneDivisor returns the effective PIT divisor for the tone, or 0 when the
+// tone is inactive.
 func (t Tone) ToneDivisor() uint16 {
 	if !t.Active {
 		return 0
@@ -43,6 +60,7 @@ func (t Tone) ToneDivisor() uint16 {
 	return t.Divisor
 }
 
+// ToneFrequency returns the tone frequency in Hz, or 0 for silence.
 func (t Tone) ToneFrequency() float64 {
 	if !t.Active || t.Divisor == 0 {
 		return 0
@@ -50,6 +68,9 @@ func (t Tone) ToneFrequency() float64 {
 	return float64(PITHz) / float64(t.Divisor)
 }
 
+// PITDivisorForFrequency converts a frequency in Hz to the nearest PIT divisor.
+//
+// Non-positive frequencies return 0. Results are clamped to the 16-bit PIT range.
 func PITDivisorForFrequency(freq float64) uint16 {
 	if !(freq > 0) {
 		return 0
@@ -64,14 +85,19 @@ func PITDivisorForFrequency(freq float64) uint16 {
 	return uint16(divisor)
 }
 
+// Variant selects the speaker model used when rendering output.
 type Variant int
 
 const (
+	// VariantClean outputs a mostly direct square-wave signal with minimal coloration.
 	VariantClean Variant = iota
+	// VariantSmallSpeaker models a small paper-cone PC speaker.
 	VariantSmallSpeaker
+	// VariantPiezo models a brighter buzzer / piezo-style speaker.
 	VariantPiezo
 )
 
+// String returns a stable human-readable name for the variant.
 func (v Variant) String() string {
 	switch v {
 	case VariantClean:
@@ -83,6 +109,8 @@ func (v Variant) String() string {
 	}
 }
 
+// ParseVariant parses a speaker variant name and returns VariantSmallSpeaker
+// for unknown values.
 func ParseVariant(s string) Variant {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "passthrough", "clean", "dry", "none":
@@ -141,6 +169,10 @@ func (r *caseReverb) process(in float64) float64 {
 
 func (r *caseReverb) reset() { *r = newCaseReverb() }
 
+// Source renders PC speaker output as stereo 16-bit little-endian PCM.
+//
+// A Source can play effect tones, music tones, or PCM-driven music that is
+// re-encoded through the speaker path.
 type Source struct {
 	mu      sync.Mutex
 	rate    int
@@ -268,6 +300,9 @@ const (
 var piezoElectricalAlpha = math.Exp(-2 * math.Pi * (piezoReOhms / (2 * math.Pi * piezoLeHenries)) / DefaultOutputSampleRate)
 var piezoHPAlpha = math.Exp(-2 * math.Pi * piezoRadiationHPHz / DefaultOutputSampleRate)
 
+// NewSource creates a playback source using the requested speaker variant.
+//
+// New sources default to DefaultOutputSampleRate.
 func NewSource(variant Variant) *Source {
 	s := &Source{rate: DefaultOutputSampleRate, reverb: newCaseReverb(), streamGain: 1}
 	s.SetVariant(variant)
@@ -285,6 +320,7 @@ func modelForVariant(v Variant) speakerModel {
 	}
 }
 
+// SetVariant switches the speaker model used for future output.
 func (s *Source) SetVariant(v Variant) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -292,12 +328,14 @@ func (s *Source) SetVariant(v Variant) {
 	s.model = modelForVariant(v)
 }
 
+// SetGain applies an input gain before speaker modeling.
 func (s *Source) SetGain(v float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.streamGain = clampVolume(v)
 }
 
+// TotalSamples reports the total number of output frames currently available.
 func (s *Source) TotalSamples() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -332,6 +370,9 @@ func (s *Source) musicPCMTotalSamplesLocked() int {
 	return len(s.musicPCM) / 4
 }
 
+// Load replaces the current effect sequence and resets playback state.
+//
+// The sequence is played at DefaultTickRate.
 func (s *Source) Load(seq []Tone, sampleRate int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -342,6 +383,8 @@ func (s *Source) Load(seq []Tone, sampleRate int) {
 	s.resetStateLocked()
 }
 
+// SetEffectMixed loads an effect sequence intended to share the speaker with
+// music playback through the package's emulated mixing path.
 func (s *Source) SetEffectMixed(seq []Tone, sampleRate int, tickRate int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -354,6 +397,9 @@ func (s *Source) SetEffectMixed(seq []Tone, sampleRate int, tickRate int) {
 	s.effectMixActive = false
 }
 
+// SetMusic loads a tone sequence as music playback.
+//
+// Calling SetMusic clears any PCM music state.
 func (s *Source) SetMusic(seq []Tone, sampleRate int, tickRate int, loop bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -379,6 +425,7 @@ func (s *Source) SetMusic(seq []Tone, sampleRate int, tickRate int, loop bool) {
 	s.musicPCMLoop = false
 }
 
+// ClearMusic stops and clears both tone-sequence and PCM music playback.
 func (s *Source) ClearMusic() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -403,6 +450,10 @@ func (s *Source) ClearMusic() {
 	s.musicPCMLoop = false
 }
 
+// SetMusicPCM loads a complete PCM music buffer.
+//
+// Input must be stereo signed 16-bit little-endian PCM. The data is consumed
+// through the package's speaker encoder at DefaultPCMUpdateRate.
 func (s *Source) SetMusicPCM(pcm []byte, sampleRate int, loop bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -424,6 +475,10 @@ func (s *Source) SetMusicPCM(pcm []byte, sampleRate int, loop bool) {
 	s.musicPCMClosed = true
 }
 
+// BeginMusicPCM starts incremental PCM music streaming.
+//
+// Subsequent data should be appended with AppendMusicPCM and finalized with
+// FinishMusicPCM.
 func (s *Source) BeginMusicPCM(sampleRate int, loop bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -445,6 +500,8 @@ func (s *Source) BeginMusicPCM(sampleRate int, loop bool) {
 	s.musicPCMLoop = loop
 }
 
+// AppendMusicPCM queues more stereo signed 16-bit little-endian PCM data for
+// an active incremental PCM music stream.
 func (s *Source) AppendMusicPCM(pcm []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -456,12 +513,14 @@ func (s *Source) AppendMusicPCM(pcm []byte) {
 	s.musicPCMActive = true
 }
 
+// FinishMusicPCM marks an incremental PCM music stream as complete.
 func (s *Source) FinishMusicPCM() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.musicPCMClosed = true
 }
 
+// BufferedMusicPCMBytes reports the number of unread PCM bytes still queued.
 func (s *Source) BufferedMusicPCMBytes() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -476,18 +535,24 @@ func (s *Source) BufferedMusicPCMBytes() int {
 	return len(s.musicPCM) - pos
 }
 
+// MusicPCMIsActive reports whether PCM music playback is still active.
 func (s *Source) MusicPCMIsActive() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.musicPCMActive
 }
 
+// MusicIsActive reports whether any music source is currently active.
 func (s *Source) MusicIsActive() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.musicPCMActive || len(s.musicSeq) > 0
 }
 
+// Read renders stereo 16-bit little-endian PCM into p.
+//
+// Source implements io.Reader. Output is written as interleaved left/right
+// samples, 4 bytes per frame.
 func (s *Source) Read(p []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -666,6 +731,9 @@ func (s *Source) Read(p []byte) (int, error) {
 	return written, nil
 }
 
+// Seek repositions playback within the currently loaded render window.
+//
+// Offsets are measured in output bytes, matching the stream exposed by Read.
 func (s *Source) Seek(offset int64, whence int) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1139,6 +1207,10 @@ func totalSamplesForToneSeq(seqLen int, sampleRate int, tickRate int) int {
 	return int(math.Round(float64(seqLen) * float64(sampleRate) / float64(tickRate)))
 }
 
+// InterleaveSequences combines effect and music tone sequences into one tone
+// stream that approximates how a single physical speaker would be time-shared.
+//
+// It returns the merged sequence and the output tick rate used for that sequence.
 func InterleaveSequences(effectSeq []Tone, effectTickRate int, musicSeq []Tone, musicTickRate int) ([]Tone, int) {
 	if len(effectSeq) == 0 {
 		return append([]Tone(nil), musicSeq...), normalizeTickRate(musicTickRate)
@@ -1182,6 +1254,9 @@ func InterleaveSequences(effectSeq []Tone, effectTickRate int, musicSeq []Tone, 
 	return out, outTickRate
 }
 
+// RenderSequenceToPCM renders one tone sequence to stereo PCM samples.
+//
+// The returned slice contains interleaved left/right 16-bit samples.
 func RenderSequenceToPCM(seq []Tone, tickRate int, variant Variant) ([]int16, error) {
 	if len(seq) == 0 {
 		return nil, nil
@@ -1196,6 +1271,8 @@ func RenderSequenceToPCM(seq []Tone, tickRate int, variant Variant) ([]int16, er
 	return renderSourceToPCM(src)
 }
 
+// RenderMixedSequencesToPCM interleaves effect and music tone sequences, then
+// renders the result to stereo PCM samples.
 func RenderMixedSequencesToPCM(effectSeq []Tone, effectTickRate int, musicSeq []Tone, musicTickRate int, variant Variant) ([]int16, error) {
 	if len(effectSeq) == 0 && len(musicSeq) == 0 {
 		return nil, nil
