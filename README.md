@@ -14,7 +14,7 @@ What makes it interesting:
 - `VariantPiezo` simulates a brighter buzzer/piezo speaker coupled to the same resonant case behavior
 - the non-clean variants include built-in case resonance and ringing instead of a plain dry square wave
 - effect tones and music tones can share one simulated speaker through time interleaving
-- PCM music can be mixed with tone effects before PC speaker encoding
+- PCM music can be mixed with `SetEffectMixed` tone effects before PC speaker encoding
 
 You can use it to:
 
@@ -50,9 +50,9 @@ Important behavior up front:
 
 - play effect and music tone streams through one `Source`
 - stream already-encoded PCM music through the same 1-bit speaker path
-- mix PCM music with tone-based sound effects before the PC speaker encoder
+- mix PCM music with `SetEffectMixed` tone-based sound effects before the PC speaker encoder
 - loop music tone sequences or streamed PCM music
-- seek within rendered output
+- seek within loaded tone playback
 - render sequences directly to `[]int16` PCM without setting up a live stream
 - choose between multiple speaker models
 
@@ -138,7 +138,7 @@ src.AppendMusicPCM(chunk)
 src.FinishMusicPCM()
 ```
 
-PCM input is expected to be stereo signed 16-bit little-endian frames. Internally it is resampled to the PC speaker control rate and encoded back into the simulated 1-bit output path.
+PCM input is expected to be stereo signed 16-bit little-endian frames. The `sampleRate` argument on `SetMusicPCM` and `BeginMusicPCM` sets the rendered output rate, while the PCM drive stream itself is consumed at `DefaultPCMUpdateRate` and re-encoded through the simulated 1-bit output path.
 
 Status helpers:
 
@@ -149,9 +149,9 @@ Status helpers:
 ### Output control
 
 - `SetVariant(v)` switches speaker model
-- `SetGain(v)` applies stream gain before speaker modeling
-- `TotalSamples()` reports the remaining render length for loaded content
-- `Seek(offset, whence)` repositions playback within the current render window
+- `SetGain(v)` applies stream gain before speaker modeling and clamps it to `0..1`
+- `TotalSamples()` reports the total output frames represented by the currently loaded content
+- `Seek(offset, whence)` repositions loaded tone playback using output-byte offsets; PCM music streaming state is not repositioned
 
 ## Offline Rendering Helpers
 
